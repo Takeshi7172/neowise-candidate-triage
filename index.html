@@ -18,18 +18,57 @@
     <textarea id="message" rows="4"></textarea>
     <button type="submit">Разобрать заявку</button>
   </form>
-  <pre id="result" aria-live="polite"></pre>
+  <p id="status" aria-live="polite"></p>
+  <p id="topic"></p>
+  <pre id="draft"></pre>
   <script type="module">
+    const VIEWS = {
+      loading: "Разбираем заявку…",
+      ready: "Готово. Проверьте черновик перед отправкой.",
+      manual_review: "Автоматический разбор не удался. Обработайте заявку вручную.",
+      invalid_input: "Введите текст заявки.",
+      error: "Сервис не отвечает. Повторите попытку или обработайте заявку вручную.",
+    };
+    const TOPIC_LABELS = { delivery: "Доставка", pricing: "Цены", other: "Другое" };
+    const CONTRACT_STATUSES = ["ready", "manual_review", "invalid_input"];
+
     const form = document.querySelector("form");
-    const result = document.querySelector("#result");
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    const button = form.querySelector("button");
+    const message = document.querySelector("#message");
+    const statusLine = document.querySelector("#status");
+    const topicLine = document.querySelector("#topic");
+    const draftBox = document.querySelector("#draft");
+
+    // Every state writes all three slots, so an old draft never survives.
+    function render(state, data = {}) {
+      const ready = state === "ready";
+      statusLine.textContent = VIEWS[state];
+      topicLine.textContent = ready ? `Тема: ${TOPIC_LABELS[data.topic] ?? data.topic}` : "";
+      draftBox.textContent = ready ? data.draft : "";
+    }
+
+    async function requestTriage(text) {
       const reply = await fetch("/api/triage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: document.querySelector("#message").value }),
+        body: JSON.stringify({ text }),
       });
-      result.textContent = JSON.stringify(await reply.json(), null, 2);
+      const body = await reply.json();
+      return CONTRACT_STATUSES.includes(body.status) ? body : { status: "error" };
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      render("loading");
+      try {
+        const body = await requestTriage(message.value);
+        render(body.status, body);
+      } catch {
+        render("error");
+      } finally {
+        button.disabled = false;
+      }
     });
   </script>
 </body>
